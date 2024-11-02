@@ -15,13 +15,13 @@
 
 typedef enum
 {
-	NODE_PIPE,	   // Pipeline node (connects commands)
+	NODE_PIPE,		// Pipeline node (connects commands)
 	NODE_CMD,		// Command node (includes command name and args)
-	NODE_REDIR,	  // Redirection node
+	NODE_REDIR,		// Redirection node
 	NODE_ARG,		// Argument node
-	NODE_WORD,	   // Word node (for command names)
+	NODE_WORD,		// Word node (for command names)
 	NODE_ENV,		// Environment variable
-	NODE_QUOTE	   // Quoted string
+	NODE_QUOTE		// Quoted string
 } ast_type;
 
 // AST node structure
@@ -29,11 +29,11 @@ typedef struct s_ast_node
 {
 	ast_type type;
 	char *data;
-	struct s_ast_node *left;   // Left child
-	struct s_ast_node *right;  // Right child
-	struct s_ast_node *args;   // For command arguments (linked list)
-	struct s_ast_node *next;   // For argument lists
-	int redir_type;		   // For redirection nodes (>, <, >>, <<)
+	struct s_ast_node *left;	// Left child
+	struct s_ast_node *right;	// Right child
+	struct s_ast_node *args;	// For command arguments (linked list)
+	struct s_ast_node *next;	// For argument lists
+	int redir_type;				// For redirection nodes (>, <, >>, <<)
 } t_ast_node;
 
 // Token structure for lexical analysis
@@ -52,6 +52,30 @@ size_t	ft_strlen(const char *str)
 
 	i = 0;
 	while (str[i] != '\0')
+		i++;
+	return (i);
+}
+
+
+size_t	ft_strlcpy(char *dst, const char *src, size_t len)
+
+{
+	size_t	i;
+
+	i = 0;
+	if (len == 0)
+	{
+		while (src[i] != '\0')
+			i++;
+		return (i);
+	}
+	while (src[i] != '\0' && i < len - 1)
+	{
+		dst[i] = src[i];
+		i++;
+	}
+	dst[i] = '\0';
+	while (src[i] != '\0')
 		i++;
 	return (i);
 }
@@ -177,7 +201,7 @@ t_ast_node *create_ast_node(ast_type type, char *data)
 	return (node);
 }
 
-// Keep the original create_token function
+// creates a token struct
 t_token *create_token(ast_type type, char *data)
 {
 	t_token *new_token;
@@ -218,7 +242,7 @@ char *handle_special_char(const char *input, int *i)
 	return data;
 }
 
-// Get length of word token
+// ft_strlen with extras
 int get_word_length(const char *input, int start)
 {
 	int len;
@@ -254,61 +278,109 @@ char *extract_token_data(const char *input, int *i)
 		return handle_special_char(input, i);
 	return handle_word(input, i);
 }
-// Modify get_basic_token_type to better handle special characters
-ast_type get_basic_token_type(char first_char)
+
+char *extract_env_var_name(const char *input, int *i)
 {
-	switch (first_char)
+	int start;
+	int len;
+	char *var_name;
+	char *result;
+
+	start = *i + 1;
+	// Check if there's no variable name after $
+	if (!input[start] || is_whitespace(input[start]) || 
+		is_special_char(input[start]) || is_quote(input[start]))
+		return ft_strdup("$");
+	len = 0;
+	while (input[start + len] && !is_whitespace(input[start + len]) && 
+		!is_special_char(input[start + len]) && !is_quote(input[start + len]))
+		len++;
+	var_name = ft_substr(input, start, len);
+	if (!var_name)
+		return NULL;
+	// Create new string with $ prefix
+	result = ft_calloc(len + 2, sizeof(char));
+	if (!result)
 	{
-		case '|':
-			return NODE_PIPE;
-		case '>':
-		case '<':
-			return NODE_REDIR;
-		case '$':
-			return NODE_ENV;
-		case '"':
-		case '\'':
-			return NODE_QUOTE;
-		default:
-			return NODE_WORD;
+		free(var_name);
+		return NULL;
 	}
+	result[0] = '$';
+	ft_strlcpy(result + 1, var_name, len + 1);
+	free(var_name);
+	*i += len;
+	return result;
 }
 
-// Modify get_token_type to better handle command arguments
+// get_basic_token_type
+ast_type get_basic_token_type(char first_char)
+{
+	if (first_char == '|')
+		return NODE_PIPE;
+	else if (first_char == '>' || first_char == '<')
+		return NODE_REDIR;
+	else if (first_char == '$')
+		return NODE_ENV;
+	else if (first_char == '"' || first_char == '\'')
+		return NODE_QUOTE;
+	else
+		return NODE_WORD;
+}
+
+// get_token_type to maybe change WORD NODE to CMD or ARG
 ast_type get_token_type(const char *data, const t_token *prev_token)
 {
 	ast_type basic_type;
 
+	// Check for environment variable
+	if (data[0] == '$')
+	{
+		// If it's after a pipe or at the start, it should be a command
+		if (!prev_token || prev_token->type == NODE_PIPE)
+			return NODE_CMD;
+		// Otherwise it's an argument
+		return NODE_ARG;
+	}
 	basic_type = get_basic_token_type(data[0]);
-		
 	// If it's already a special token, return that type
 	if (basic_type != NODE_WORD)
 		return basic_type;
-		
-	// If no previous token, or previous token was a pipe or redirection,
-	// this word is a command
-	if (!prev_token || prev_token->type == NODE_PIPE || 
-		prev_token->type == NODE_REDIR)
+	// If no previous token, or previous token was a pipe, this word is a command
+	if (!prev_token || prev_token->type == NODE_PIPE)
 		return NODE_CMD;
-		
+	// If previous token was a redirection, this is a filename (WORD)
+	if (prev_token->type == NODE_REDIR)
+		return NODE_WORD;
 	// If previous token was a command or argument, this is an argument
 	if (prev_token->type == NODE_CMD || prev_token->type == NODE_ARG)
 		return NODE_ARG;
-		
 	return NODE_WORD;
 }
+
 
 // initialize new token
 t_token *init_new_token(const char *input, int *i, t_token *prev_token)
 {
 	t_token *new_token;
 	char *token_data;
+	ast_type token_type;
 
-	token_data = extract_token_data(input, i);
-	if (!token_data)
-		return NULL;
-
-	new_token = create_token(get_token_type(token_data, prev_token), token_data);
+	if (input[*i] == '$')
+	{
+		token_data = extract_env_var_name(input, i);
+		if (!token_data)
+			return NULL;
+		// Determine if this env var should be a command or argument
+		token_type = get_token_type(token_data, prev_token);
+		new_token = create_token(token_type, token_data);
+	}
+	else
+	{
+		token_data = extract_token_data(input, i);
+		if (!token_data)
+			return NULL;
+		new_token = create_token(get_token_type(token_data, prev_token), token_data);
+	}
 	if (!new_token)
 	{
 		free(token_data);
@@ -371,7 +443,7 @@ void cleanup_tokens(t_token *head)
 	}
 }
 
-// Modified parse_command to handle arguments properly
+// parses command into CMD node and checks if there is an argument following
 t_ast_node *parse_command(t_token **tokens)
 {
 	t_ast_node *cmd_node;
@@ -547,6 +619,18 @@ void print_ast(t_ast_node *node, int depth)
 	print_ast(node->right, depth + 1);
 }
 
+void print_tokens(t_token *head)
+{
+	t_token *current = head;
+	printf("Tokens:\n");
+	while (current)
+	{
+		printf("Type: %d, Data: '%s'\n", current->type, current->data);
+		current = current->next;
+	}
+	printf("\n");
+}
+
 void free_ast(t_ast_node *node)
 {
 	if (!node)
@@ -585,7 +669,8 @@ int main(int argc, char **argv)
 	t_token *tokens = lexer(argv[1]);
 	if (!tokens)
 		return 1;
-		
+	print_tokens(tokens);
+	printf("lexing sucessful\n\n");
 	t_ast_node *ast = parse(tokens);
 	if (ast)
 		print_ast(ast, 0);
